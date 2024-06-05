@@ -6,8 +6,8 @@ import torch
 from typing import List
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from client import Client
-from model import HealthNet
+from .client import Client
+from .model import HealthNet
 
 # the server class that is going to manage all of the clients and their updates
 class Server:
@@ -42,22 +42,41 @@ class Server:
 			
 			# initialize aggregated weights with the shape of model parameters
 			aggregated_weights = {name: torch.zeros_like(param, device=self.device) 
-									for name, param in self.model.named_parameters()}
+								for name, param in self.model.named_parameters()}
+			
+			# initialize aggregated buffers (for BatchNorm parameters)
+			aggregated_buffers = {name: torch.zeros_like(buffer, device=self.device)
+								for name, buffer in self.model.named_buffers()}
 
-			# sum all client gradients
+			# sum all client parameters
 			for client_state in self.client_weights:
-		
 				for name, param in client_state.items():
-					
-					# add a weighted sum of the parameters
-					aggregated_weights[name] += param / len(self.client_weights)
+					if name in aggregated_weights:
+						aggregated_weights[name] += param
+					elif name in aggregated_buffers:
+						aggregated_buffers[name] += param
+      
+			# divide by the number of clients
+			for name in aggregated_weights:
+				aggregated_weights[name] /= len(self.client_weights)
+			for name in aggregated_buffers:
+				aggregated_buffers[name] = aggregated_buffers[name].float() / len(self.client_weights)
 
-			# load the aggregated weights into the server model
-			self.model.load_state_dict(aggregated_weights)
+			# convert aggregated weights back to long if necessary
+			for name, param in aggregated_weights.items():
+				if self.model.state_dict()[name].dtype == torch.long:
+					aggregated_weights[name] = aggregated_weights[name].to(dtype=torch.long)
+			for name, buffer in aggregated_buffers.items():
+				if self.model.state_dict()[name].dtype == torch.long:
+					aggregated_buffers[name] = aggregated_buffers[name].to(dtype=torch.long)
 
+			# load the aggregated weights and buffers into the server model
+			combined_state_dict = {**aggregated_weights, **aggregated_buffers}
+			self.model.load_state_dict(combined_state_dict, strict=False)
+   
 			# clear the weights after aggregation
 			self.client_weights = []
-   
+	
 
 	# function to aggregate the gradients of the clients
 	def aggregate_gradients(self):
@@ -82,7 +101,11 @@ class Server:
 
 
 	# define a general run function that chooses the strategy based on the environment
-	def run(self):
+	def run(self, num_rounds=-1):
+     
+		# reset the number of rounds if it is passed in
+		if num_rounds != -1:
+			self.num_rounds = num_rounds
      
 		# go through the number of rounds that we are going to be training for
 		for _ in range(self.num_rounds):
@@ -99,6 +122,20 @@ class Server:
 				self.distributed_training()
 			else:
 				raise ValueError('Environment not recognized.')
+
+
+	# function to set up the training environment for the central server
+	def setup_distributed_environment(self):
+     
+     	# depending on the environment that we are working in do different things
+		if self.environment == 'central':
+			pass
+		elif self.environment == 'federated':
+			pass
+		elif self.environment == 'distributed':	
+			pass
+		else:
+			raise ValueError('Environment not recognized.')
 
 	
  	# function to aggregate data from clients
@@ -162,7 +199,7 @@ class Server:
       
 			# get the weights of the model
 			weights = client.get_weights()
-	  
+   
 			# add the weights to the server
 			client_weights.append(weights)
    

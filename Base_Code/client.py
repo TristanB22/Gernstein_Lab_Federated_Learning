@@ -4,7 +4,7 @@
 import torch
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from model import HealthNet
+from .model import HealthNet
 
 # the client class
 # this is one of a series of clients that are going to be used in the federated learning process
@@ -19,8 +19,9 @@ class Client:
 	def __init__(self, 
 					dataset: torch.utils.data.Subset, 
 					device: torch.device,
-					num_epochs: int = 1,
+					num_epochs: int = 5,
 					learning_rate: float = 0.01,
+					batch_size: int = 8,
 					adversarial: bool = False,
 					adversarial_level: int = 0,
 					adversarial_method: str = 'none'
@@ -28,7 +29,7 @@ class Client:
 		
 		self.model = HealthNet(30).to(device)
   
-		self.dataset = DataLoader(dataset, batch_size=32, shuffle=True)
+		self.dataset = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 		self.device = device
 		self.num_epochs = num_epochs
 		self.learning_rate = learning_rate
@@ -65,7 +66,11 @@ class Client:
 	# function to train the model for some number of epochs and return the weights
 	# epochs: the number of epochs that the model should be trained for
 	# learning_rate: the learning rate that the model should be trained with
-	def get_weights(self, epochs=1, learning_rate=0.01):
+	def get_weights(self, epochs=-1, learning_rate=0.01):
+     
+		# check if we want to be training for some right number of epochs
+		if epochs == -1:
+			epochs = self.num_epochs
 		
 		# if the client is adversarial, then we should run the adversarial training
 		if self.adversarial:
@@ -99,7 +104,7 @@ class Client:
 	def adversarial_train(self, epochs, learning_rate, save_gradients=False):
 	
 		# define the loss function and the optimizer for the model over this one training session
-		criterion = torch.nn.CrossEntropyLoss()
+		criterion = torch.nn.MSELoss()
 		optimizer = torch.optim.SGD(self.model.parameters(), lr=learning_rate)
 
 		# set the model to training mode
@@ -169,14 +174,17 @@ class Client:
 		self.agg_grads = []
 
 		# define the loss function and the optimizer for the model over this one training session
-		criterion = torch.nn.CrossEntropyLoss()
+		criterion = torch.nn.MSELoss()
 		optimizer = torch.optim.SGD(self.model.parameters(), lr=learning_rate)
 
 		# set the model to training mode
 		self.model.train()
 		
 		# train the model for the number of epochs that are specified
-		for _ in range(epochs):
+		for e_num in range(epochs):
+			
+   			# initialize a variable to store the total loss
+			total_loss = 0
 			
 			# iterate over the dataset
 			for data, target in self.dataset:
@@ -193,13 +201,19 @@ class Client:
 				# calculate the loss and backpropagate
 				loss = criterion(output, target)
 				loss.backward()
-	
+				
 				# save the gradients if we are supposed to
 				if save_gradients:
 					self.agg_grads.append({name: param.grad for name, param in self.model.named_parameters()})
 				
 				# update model parameters
 				optimizer.step()
+				
+				# accumulate the loss
+				total_loss += loss.item()
+	
+			# print the loss
+			# print(f"Epoch {e_num+1} Loss: {total_loss / len(self.dataset)}")
     
     
     # define the function that is going to be called if we are doing distributed learning

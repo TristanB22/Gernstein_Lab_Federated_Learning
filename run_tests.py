@@ -37,6 +37,9 @@
 # 					This does not affect the inference attack
 # 		- default: 3
 
+# --verbose: the level of verbosity that the program should run at
+# 		- options: '0', '1', '2'
+
 
 
 # import the necessary libraries
@@ -51,26 +54,33 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from client import Client
-from server import Server
+from Base_Code import Client, Server, HealthNet
 
 # the batch size that each of the loaders will use
-BATCH_SIZE = 32
+BATCH_SIZE = 8
 
 
 # define a function that parses the arguments that are passed to the program
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Run federated learning experiments with attacks.")
-    parser.add_argument('--env', type=str, default='central', choices=['central', 'federated', 'distributed', 'all'],
-                        help='The environment to use for the attack.')
-    parser.add_argument('--attack', type=str, default='none', choices=['noise', 'inference', 'poison', 'none'],
-                        help='The type of attack to run.')
-    parser.add_argument('--num_clients', type=int, default=10, help='Number of clients in the federated learning setup.')
-    parser.add_argument('--num_rounds', type=int, default=10, help='Number of training rounds.')
-    parser.add_argument('--num_epochs', type=int, default=1, help='Number of epochs each client trains per round.')
-    parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate for training.')
-    parser.add_argument('--attack_intensity', type=int, default=3, help='Intensity of the attack, scale 1-5.')
-    return parser.parse_args()
+	
+	# create the parser
+	parser = argparse.ArgumentParser(description="Run federated learning experiments with attacks.")
+	
+	# get the arguments
+	parser.add_argument('--env', type=str, default='central', choices=['central', 'federated', 'distributed', 'all'],
+						help='The environment to use for the attack.')
+	parser.add_argument('--attack', type=str, default='none', choices=['noise', 'inference', 'poison', 'none'],
+						help='The type of attack to run.')
+	parser.add_argument('--num_clients', type=int, default=10, help='Number of clients in the federated learning setup.')
+	parser.add_argument('--num_rounds', type=int, default=10, help='Number of training rounds.')
+	parser.add_argument('--num_epochs', type=int, default=5, help='Number of epochs each client trains per round.')
+	parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate for training.')
+	parser.add_argument('--attack_intensity', type=int, default=3, choices=[1, 2, 3, 4, 5], help='Intensity of the attack, scale 1-5.')
+	parser.add_argument('--verbose', type=int, default=0, choices=[0, 1, 2],
+						help='The level of verbosity that the program should run at.')
+	
+	# return the values
+	return parser.parse_args()
 
 
 
@@ -113,6 +123,10 @@ def load_and_preprocess_data(filepath, num_clients, validation_split=0.1):
 	total_size = len(dataset)
 	val_size = int(total_size * validation_split)
 	train_size = total_size - val_size
+ 
+	print(f"Length of dataset: {total_size}")
+	print(f"Length of training dataset: {train_size}")
+	print(f"Length of validation dataset: {val_size}")
 
 	# split the dataset into train and validate
 	train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
@@ -121,8 +135,8 @@ def load_and_preprocess_data(filepath, num_clients, validation_split=0.1):
 	sizes = [train_size // num_clients] * num_clients
 
 	# handle the remainder of the data
-	sizes[-1] += total_size % num_clients  
-
+	sizes[-1] += train_size - sum(sizes)
+ 
 	# get the data subsets
 	train_subsets = random_split(train_dataset, sizes)
 
@@ -147,20 +161,19 @@ def validate_model(model, dataset, device):
     
 	# set the model to evaluation mode
 	model.eval()
-	
+
 	# get the data loader
 	loader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
-	
-	# define the loss and the accuracy
-	loss = 0
-	accuracy = 0
-	
+
+	# initialize the total loss and accuracy count
+	total_loss = 0
+	accuracy_count = 0
+
 	# define the loss function
-	criterion = torch.nn.CrossEntropyLoss()
-	
+	criterion = torch.nn.MSELoss()
+
 	# loop through the data
 	for data, target in loader:
-		
 		# move the data to the right device
 		data, target = data.to(device), target.to(device)
 		
@@ -168,17 +181,26 @@ def validate_model(model, dataset, device):
 		output = model(data)
 		
 		# compute the loss
-		loss += criterion(output, target).item()
+		total_loss += criterion(output, target).item()
 		
-		# get the accuracy
-		accuracy += (output.argmax(1) == target).sum().item()
-	
-	# return the loss and the accuracy
-	return loss / len(loader), accuracy / len(dataset)
+		# apply thresholds to output for custom accuracy calculation
+		output = output.squeeze()  # Ensure output is of correct shape, adjust as necessary
+		predictions = (output > 0.5).float() * (target > 0.5).float() + (output < 0.5).float() * (target < 0.5).float()
+		
+		# count accurate predictions
+		accuracy_count += predictions.sum().item()
+
+	# calculate the average loss and accuracy over all batches
+	average_loss = total_loss / len(loader)
+	accuracy = accuracy_count / (len(dataset) * BATCH_SIZE)
+
+	# return the average loss and accuracy
+	return average_loss, accuracy
+
 
 
 # the main function that is going to be run
-def main(data_file='../data.csv'):
+def main(data_file='./data.csv'):
 	
 	# get the arguments
 	args = parse_arguments()
@@ -190,13 +212,42 @@ def main(data_file='../data.csv'):
 	num_epochs = args.num_epochs
 	learning_rate = args.learning_rate
 	attack_intensity = args.attack_intensity
+	verbosity_level = args.verbose
  
 	# get the device that we should be training on
 	if torch.backends.mps.is_available():
 		device = torch.device('mps')
 	else:
 		device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+  
 	
+	fed_attack_ascii = '''
+ _______________________________________________________________
+ ______ ______ _____          _______ _______       _____ _  __
+ |  ____|  ____|  __ \      /\|__   __|__   __|/\   / ____| |/ /
+ | |__  | |__  | |  | |    /  \  | |     | |  /  \ | |    | ' / 
+ |  __| |  __| | |  | |   / /\ \ | |     | | / /\ \| |    |  <  
+ | |    | |____| |__| |  / ____ \| |     | |/ ____ \ |____| . \ 
+ |_|    |______|_____/  /_/    \_\_|     |_/_/    \_\_____|_|\_\\
+ _______________________________________________________________
+                                                                '''
+                                                                
+	print(fed_attack_ascii)
+  
+	# print the arguments
+	print("Arguments:")
+	print(f"Environment: {env}")
+	print(f"Attack: {attack}")
+	print(f"Number of Clients: {num_clients}")
+	print(f"Number of Rounds: {num_rounds}")
+	print(f"Number of Epochs: {num_epochs}")
+	print(f"Learning Rate: {learning_rate}")
+	print(f"Attack Intensity: {attack_intensity}")
+	print(f"Verbose: {verbosity_level}")
+
+	# print the device
+	print(f"Device: {device}")
+  
  
 	# load the data
 	client_datasets, val_dataset = load_and_preprocess_data(data_file, num_clients)
@@ -206,8 +257,9 @@ def main(data_file='../data.csv'):
  
 	# create the clients
 	for i in range(num_clients):
-		client = Client(dataset=client_datasets[i], device=device, num_epochs=num_epochs, learning_rate=learning_rate, adversarial=False, adversarial_level=0, adversarial_method='none')
+		client = Client(dataset=client_datasets[i], device=device, num_epochs=num_epochs, learning_rate=learning_rate, batch_size=BATCH_SIZE, adversarial=False, adversarial_level=0, adversarial_method='none')
 		clients.append(client)
+  
   
 	# if the attack method is inference, then two of the clients are going to be working together and adversarial
 	# below we are going to replace the clients with the adversarial clients
@@ -228,6 +280,10 @@ def main(data_file='../data.csv'):
 		index = random.randint(0, num_clients - 1)
 		clients[index] = Client(dataset=client_datasets[i], device=device, num_epochs=num_epochs, learning_rate=learning_rate, adversarial=True, adversarial_level=attack_intensity, adversarial_method=attack)
   
+	elif attack == 'all':
+		raise NotImplementedError('All attacks are not implemented yet.')
+
+  
 	# create the server and the clients
 	server = Server(device=device, clients=clients, environment=env, num_rounds=num_rounds, batch_size=BATCH_SIZE)
  
@@ -235,11 +291,23 @@ def main(data_file='../data.csv'):
 	server.setup_distributed_environment()
  
 	# start the training
-	server.run()
- 
+	for i in range(num_rounds):
+		
+		print(f"Round {i + 1}")
+		server.run(num_rounds=1)
+
+
 	# validate the model and get the statistics
 	loss, accuracy = validate_model(server.model, val_dataset, device)
-	
+
+	# print the state dictionary 
+	if verbosity_level > 1:
+		print(f"State Dictionary: {server.model.state_dict()}")
+
+	# print the statistics
+	print(f"RESULTS")
+	print(f"Validation Loss: {loss}")
+	print(f"Validation Accuracy: {(accuracy * 100):2f}%")
 
 
 if __name__ == "__main__":

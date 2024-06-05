@@ -31,4 +31,4 @@ class HealthNet(nn.Module):
 
 	# define the forward pass of the network
 	def forward(self, x):
-		return self.fc(x)
+		return self.network(x)
