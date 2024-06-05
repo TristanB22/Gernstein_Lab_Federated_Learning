@@ -50,6 +50,8 @@ import argparse
 import numpy as np
 import pandas as pd
 
+from tqdm import tqdm
+
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from torch.utils.data import DataLoader, TensorDataset, random_split
@@ -291,9 +293,7 @@ def main(data_file='./data.csv'):
 	server.setup_distributed_environment()
  
 	# start the training
-	for i in range(num_rounds):
-		
-		print(f"Round {i + 1}")
+	for i in tqdm(range(num_rounds), desc='Training Rounds'):
 		server.run(num_rounds=1)
 
 
