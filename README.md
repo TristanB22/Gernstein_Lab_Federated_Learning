@@ -39,12 +39,16 @@ The script accepts several options to tailor the federated learning environment 
   - Default: `3`
   - This parameter does not affect the 'inference' attack type.
 
+- **--verbose**: Adjusts the level of verbosity that the program should run at to help with debugging and development.
+	- Type: `int`
+	- Default: `0`
+
 ### Example Usage
 
 To run the project in a federated environment with a noise attack, using five clients for ten training rounds, execute the following command:
 
 ```bash 
-python run_tests.py --env federated --attack noise --num_clients 5 --num_rounds 10 --num_epochs 1 --learning_rate 0.01 --attack_intensity 3
+python3 run_tests.py --env federated --attack none --num_clients 6 --num_rounds 10 --num_epochs 3 --learning_rate 0.001 --attack_intensity 4 --verbose 0
 ```
 
 This command configures the system to simulate a realistic scenario where client-side model training might be subjected to noise, affecting the quality of updates sent to the server.
