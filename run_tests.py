@@ -249,6 +249,7 @@ def main(data_file='./data.csv'):
 
 	# print the device
 	print(f"Device: {device}")
+	print()
   
  
 	# load the data
@@ -293,9 +294,7 @@ def main(data_file='./data.csv'):
 	server.setup_distributed_environment()
  
 	# start the training
-	for i in tqdm(range(num_rounds), desc='Training Rounds'):
-		server.run(num_rounds=1)
-
+	server.run(num_rounds=num_rounds)
 
 	# validate the model and get the statistics
 	loss, accuracy = validate_model(server.model, val_dataset, device)
@@ -306,7 +305,7 @@ def main(data_file='./data.csv'):
 
 	# print the statistics
 	print(f"RESULTS")
-	print(f"Validation Loss: {loss}")
+	print(f"Validation Loss: {loss:.4f}")
 	print(f"Validation Accuracy: {(accuracy * 100):2f}%")
 
 

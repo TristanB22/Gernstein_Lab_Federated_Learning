@@ -112,7 +112,10 @@ class Client:
   
 		# train the model for the number of epochs that are specified
 		for _ in range(epochs):
-      
+	  
+			# initialize a variable to store the total loss
+			total_loss = 0
+	  
 			# iterate over the dataset
 			for data, target in self.dataset:
 		
@@ -139,7 +142,7 @@ class Client:
 						for param in self.model.parameters():
 							if param.grad is not None:
 								# invert the gradient
-								param.grad *= -1  
+								param.grad *= -1 * 2 * self.adversarial_level
 
 		
 				# add noise to the gradients of the model
@@ -160,6 +163,15 @@ class Client:
 					for name, param in self.model.named_parameters():
 						if param.grad is not None:
 							self.agg_grads[name] += param.grad.clone()
+				
+				# accumulate the loss
+				total_loss += loss.item()
+			
+			# calculate the average loss for the epoch
+			avg_loss = total_loss / len(self.dataset)
+   
+			# print the average loss
+			# print(f"Epoch {_+1} Average Loss: {avg_loss}")
 
   
 		

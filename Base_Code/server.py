@@ -6,6 +6,8 @@ import torch
 from typing import List
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
+from tqdm import tqdm
+
 from .client import Client
 from .model import HealthNet
 
@@ -108,7 +110,7 @@ class Server:
 			self.num_rounds = num_rounds
      
 		# go through the number of rounds that we are going to be training for
-		for _ in range(self.num_rounds):
+		for _ in tqdm(range(self.num_rounds), desc='Training Rounds'):
       
 			# reset the weights of the clients to be the same as the server weights
 			self.reset_distributed_weights()
