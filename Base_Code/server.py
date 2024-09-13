@@ -36,6 +36,9 @@ class Server:
 		self.client_weights = []
 		self.client_gradients = []
 
+		# set the server for each of the clients
+		self.set_server()
+
 
 	# function to aggregate the parameters of the clients
 	def aggregate_parameters(self):
@@ -108,7 +111,13 @@ class Server:
 		# reset the number of rounds if it is passed in
 		if num_rounds != -1:
 			self.num_rounds = num_rounds
-     
+
+		# before training make sure that the server is set up correctly
+		for t_client in self.clients:
+			if t_client.check_server() == False:
+				self.set_server()
+				break
+
 		# go through the number of rounds that we are going to be training for
 		for _ in tqdm(range(self.num_rounds), desc='Training Rounds'):
       
@@ -174,7 +183,11 @@ class Server:
   
 		# train the model on the central data
 		for data, target in central_loader:
-			
+
+			# skip if there is only one value
+			if data.shape[0] == 1:
+				continue
+
 			# move the data to the right device
 			data, target = data.to(self.device), target.to(self.device)
 
@@ -244,10 +257,10 @@ class Server:
 	# define the function that is going to be called at the end of distributed training
 	# by the final client
 	def distributed_training_end(self, total_gradients):
-     
 		# apply the aggregated gradients to the server model parameters
 		for name, param in self.model.named_parameters():
-			param -= total_gradients[name] / len(self.clients)
+			param.data -= total_gradients[name].detach() / len(self.clients)
+
 	
     
     
@@ -260,5 +273,13 @@ class Server:
 		
 			# set the model weights to be the same as the server weights
 			client.set_weights(self.model.state_dict())
+
+
+	# go through and set the server for each of the clinets
+	def set_server(self):
+
+		# set the server for each of the clients
+		for client in self.clients:
+			client.set_server(self)
 		
 

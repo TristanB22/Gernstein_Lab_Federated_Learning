@@ -60,3 +60,12 @@ This repository will be updated with more experiments that can be run as they ar
 The data that is used in this example project is provided by the [Dr. Wolberg at the University of Wisconsin Hospitals, Madison](https://archive.ics.uci.edu/dataset/15/breast+cancer+wisconsin+original). The data is not included in the Github repository for the sake of space. However, the code can be trivially altered to allow for other datasets to be used instead. 
 
 This project is supervised by the Gernstein Lab at Yale. Please reach out to the author, [Tristan Brigham](mailto:tristan.brigham@yale.edu) with any questions. 
+
+
+
+
+
+
+### To Do:
+
+- [ ] Get the loss and accuracy metrics

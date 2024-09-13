@@ -200,13 +200,17 @@ def validate_model(model, dataset, device):
 	return average_loss, accuracy
 
 
+# function to validate the arguments that were passed to the program
+def validate_arguments(args) -> dict:
 
-# the main function that is going to be run
-def main(data_file='./data.csv'):
-	
-	# get the arguments
-	args = parse_arguments()
+	'''
+	Function to validate that the arguments that are passed to the program are not going to cause issues
+	with the rest of the program. This does things like make sure that the number of epochs is not a negative number.
 
+	:param args: an object containing the arguments that we passed to the program in it
+	'''
+
+	# parse the arguments
 	env = args.env
 	attack = args.attack
 	num_clients = args.num_clients
@@ -215,6 +219,39 @@ def main(data_file='./data.csv'):
 	learning_rate = args.learning_rate
 	attack_intensity = args.attack_intensity
 	verbosity_level = args.verbose
+
+	# validate the arguments
+	if num_epochs <= 0:
+		raise ValueError(f"Number of epochs recieved was {num_epochs}. This is not a valid number of epochs")
+
+	# return the associated dict
+	return {
+		'env': env,
+		'attack': attack,
+		'num_clients': num_clients,
+		'num_rounds': num_rounds,
+		'num_epochs': num_epochs,
+		'learning_rate': learning_rate,
+		'attack_intensity': attack_intensity,
+		'verbosity_level': verbosity_level,
+	}
+
+
+# the main function that is going to be run
+def main(data_file='./data.csv'):
+	
+	# getting the dictionary of arguments
+	args_dict = validate_arguments(parse_arguments())
+
+	# get the args from the dict
+	env = args_dict['env']
+	attack = args_dict['attack']
+	num_clients = args_dict['num_clients']
+	num_rounds = args_dict['num_rounds']
+	num_epochs = args_dict['num_epochs']
+	learning_rate = args_dict['learning_rate']
+	attack_intensity = args_dict['attack_intensity']
+	verbosity_level = args_dict['verbosity_level']
  
 	# get the device that we should be training on
 	if torch.backends.mps.is_available():
@@ -275,7 +312,7 @@ def main(data_file='./data.csv'):
 
 		# assign dual adversarial clients
 		clients[index] = Client(dataset=client_datasets[i], device=device, num_epochs=num_epochs, learning_rate=learning_rate, adversarial=True, adversarial_level=attack_intensity, adversarial_method='inference')
-		clients[index + 2] = [clients[index]]
+		clients[index + 2] = clients[index]
   
 	elif attack == 'noise' or attack == 'poison':
      

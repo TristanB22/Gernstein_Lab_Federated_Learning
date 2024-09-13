@@ -2,6 +2,7 @@
 # which is going to recieve the model weights, compute the gradient with respect to the local update
 # that it has, and then return the gradient before recieving the global gradient update
 import torch
+import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
 from .model import HealthNet
@@ -24,11 +25,15 @@ class Client:
 					batch_size: int = 8,
 					adversarial: bool = False,
 					adversarial_level: int = 0,
-					adversarial_method: str = 'none'
+					adversarial_method: str = 'none',
 				):
 		
 		self.model = HealthNet(30).to(device)
+
+		# save the server
+		self.server = None
   
+		# save everything else that we need to save
 		self.dataset = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 		self.device = device
 		self.num_epochs = num_epochs
@@ -44,11 +49,12 @@ class Client:
 		# this is only used when we are using distributed learning 
 		self.next_client = None
   
+		self.first_pass = True
+
 		# if this is an adversarial client define a variable that defines whether this is the 
   		# first or second pass utilizing the data for a given training loop
 		# we assume that there are not other clients that are adversarial or fail in the loop
 		if self.adversarial:
-			self.first_pass = True
 			self.saved_gradients = None
 
   
@@ -61,7 +67,15 @@ class Client:
 	def reset_agg_gradients(self):
 		self.agg_grads = {name: torch.zeros_like(param, device=self.device) 
 							for name, param in self.model.named_parameters()}
-  
+		
+	# function for setting the server object
+	def set_server(self, server):
+		self.server = server
+
+	# function to check whether the server has been set
+	def check_server(self):
+		return not self.server is None
+
 
 	# function to train the model for some number of epochs and return the weights
 	# epochs: the number of epochs that the model should be trained for
@@ -230,29 +244,41 @@ class Client:
     
     # define the function that is going to be called if we are doing distributed learning
 	def distributed_train(self, aggregated_gradients, num_in_sequence):
-     
+
 		# if this is the first pass, then we should send the data to the next client
-		if self.first_pass:
-		
+		if not self.adversarial or self.first_pass:
+
   			# train the model
 			self.normal_train(self.num_epochs, self.learning_rate, save_gradients=True)
-	
-			# add the gradients to the aggregated gradients
-			for name, param in self.agg_grads.items():
-				aggregated_gradients[name] += param.grad
+
+			# average gradients variable
+			# t_avg_gradients = {name: torch.zeros_like(param, device=self.device) 
+			# 					for name, param in self.model.named_parameters()}
+			t_avg_gradients = {}
+
+			# calculate the average gradients for this training session
+			for name, param in self.agg_grads[0].items():
+				t_avg_gradients[name] = torch.stack([grad[name] for grad in self.agg_grads]).mean(dim=0)
+
+			# add the average gradients to the aggregated gradients
+			for name, param in t_avg_gradients.items():
+				aggregated_gradients[name] += param
     
 			# now save a clone of the aggregated gradients in the local variable
 			if self.adversarial:
-				self.saved_gradients = {name: param.grad.clone() for name, param in self.agg_grads.items()}
-		
+				# self.saved_gradients = {name: param.grad.clone() for name, param in self.agg_grads[0].items()}
+				self.saved_gradients = aggregated_gradients
+
 		else:
 			
 			# we do not need to train the model again
 			# we just need to pass the gradients to the next client
 			# but we can also run the data attack on the delta in the gradients
-   
+
 			# compute the difference in the first saved gradients against these gradients
-			delta_gradients = {name: param.grad - self.saved_gradients[name] for name, param in self.agg_grads.items()}
+			delta_gradients = {}
+			for name, param in aggregated_gradients.items():
+				delta_gradients[name] = param - self.saved_gradients[name]
    
 			# run the data attack on the delta gradients
 			self.inference_attack(delta_gradients)
@@ -261,7 +287,8 @@ class Client:
 			for name, param in self.agg_grads.items():
 				aggregated_gradients[name] += param.grad
 
-
+		# if this is an adversarial client, then we should save the gradients if
+		# this is the first pass through the model
 		if self.adversarial:
 			
 			# clear the gradients if this is the second pass
@@ -275,12 +302,14 @@ class Client:
 		if self.next_client:
 			self.next_client.distributed_train(aggregated_gradients, num_in_sequence + 1)
 		else:
-			self.distributed_training_end(aggregated_gradients)
-
+			self.server.distributed_training_end(aggregated_gradients)
 
 
 	# define a function to run the inference attack
 	def inference_attack(self, delta_gradients):
+		
+		print(delta_gradients)
+
 		raise NotImplementedError('Inference attack not implemented yet.')
 
 
@@ -289,4 +318,52 @@ class Client:
 		
 		# return all the data from the dataloader
 		return [(data, label) for data, label in self.dataset]
+	
+
+	# # define a function that given a set of gradients is able to find the input that 
+	# # produced those gradients using the gradient descent method
+	# # this implementation only works for a single input
+	# # and there will be another function implemented for batch inputs
+	# def find_input(self, gradients, label, learning_rate=0.01, num_steps=1000):
+		
+	# 	# initialize model
+	# 	model = SimpleModel()
+
+	# 	# target gradients (example, replace with your actual gradients)
+	# 	target_gradients = torch.tensor([1.0, 1.0], requires_grad=False)
+
+	# 	# initial input (requires_grad=True for optimization)
+	# 	input_tensor = torch.tensor([0.0], requires_grad=True)
+
+	# 	# optimizer to optimize input_tensor
+	# 	optimizer = optim.Adam([input_tensor], lr=0.01)
+
+	# 	# number of optimization steps
+	# 	num_steps = 1000
+
+	# 	for step in range(num_steps):
+	# 		optimizer.zero_grad()
+			
+	# 		# forward pass
+	# 		output = model(input_tensor)
+			
+	# 		# compute gradients
+	# 		gradients = torch.autograd.grad(outputs=output, inputs=model.parameters(), create_graph=True)
+			
+	# 		# flatten gradients and compute loss
+	# 		flattened_gradients = torch.cat([grad.view(-1) for grad in gradients])
+	# 		loss = torch.mean((flattened_gradients - target_gradients) ** 2)
+			
+	# 		# backward pass
+	# 		loss.backward()
+			
+	# 		# optimization step
+	# 		optimizer.step()
+			
+	# 		# print loss and input tensor for monitoring
+	# 		if step % 100 == 0:
+	# 			print(f'Step {step}, Loss: {loss.item()}, Input: {input_tensor.item()}')
+
+	# 	# final optimized input
+	# 	print(f'Final optimized input: {input_tensor.item()}')
 
